@@ -3,8 +3,9 @@ name: Check Activity Log
 on:
   schedule:
     # 每天北京时间 10:00 (UTC 02:00) 和 23:00 (UTC 15:00)
+    # 注意：GitHub Action 的定时任务通常会有 5-30 分钟的随机延迟
     - cron: '0 2,15 * * *'
-  workflow_dispatch: # 允许手动点击运行测试
+  workflow_dispatch: # 允许你随时在 Actions 页面手动点击按钮测试
 
 jobs:
   check-log:
@@ -19,30 +20,39 @@ jobs:
           
           # 1. 检查文件是否存在
           if [ ! -f "$LOG_FILE" ]; then
-            echo "Log file not found!"
+            echo "错误：找不到日志文件 $LOG_FILE"
             curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/找不到日志文件"
-            exit 0
+            exit 1
           fi
 
-          # 2. 获取最后一行的时间戳并转为 Unix 秒数 (假设 log 格式为 YYYY-MM-DD HH:MM:SS)
+          # 2. 读取最后一行记录
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
-          echo "最后记录时间: $LAST_LOG_TIME"
+          echo "文件内最后记录时间: $LAST_LOG_TIME"
           
-          # 将北京时间格式转换为 Unix 时间戳 (Linux 环境下处理)
-          # 注意：date 指令在处理这种格式时需要指定时区或确保环境一致
-          LAST_TS=$(date -d "$LAST_LOG_TIME" +%s)
+          # 3. 核心：将北京时间记录转换为标准 Unix 时间戳
+          # 通过在字符串后添加 +0800 强制指定时区，防止负数出现
+          LAST_TS=$(date -d "$LAST_LOG_TIME +0800" +%s)
+          
+          # 4. 获取当前系统 Unix 时间戳
           CURRENT_TS=$(date +%s)
           
-          # 3. 计算差值（秒）
+          # 5. 计算时间差（秒）
           DIFF=$(( CURRENT_TS - LAST_TS ))
           THREE_HOURS_IN_SECONDS=10800
           
-          echo "当前时间戳: $CURRENT_TS"
-          echo "时间差(秒): $DIFF"
+          echo "最后记录时间戳: $LAST_TS"
+          echo "当前系统时间戳: $CURRENT_TS"
+          echo "已停滞秒数: $DIFF"
 
+          # 6. 逻辑判断
           if [ $DIFF -gt $THREE_HOURS_IN_SECONDS ]; then
-            echo "超过3小时没有记录，发送警告！"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/记录已停滞${DIFF}秒"
+            echo "警告：已经超过 3 小时没有新记录！"
+            # 转换为分钟方便阅读
+            DIFF_MIN=$(( DIFF / 60 ))
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/记录已停滞${DIFF_MIN}分钟"
+          elif [ $DIFF -lt 0 ]; then
+            echo "异常：时间差为负数，请检查 log.txt 格式是否为 YYYY-MM-DD HH:MM:SS"
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行出错/时间计算逻辑异常"
           else
-            echo "记录正常，无需操作。"
+            echo "记录正常：距离上次操作仅过去 $DIFF 秒。"
           fi
