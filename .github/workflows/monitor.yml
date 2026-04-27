@@ -4,7 +4,7 @@ on:
   schedule:
     # 每天北京时间 10:00 (UTC 02:00) 和 23:00 (UTC 15:00)
     # 注意：GitHub Action 的定时任务通常会有 5-30 分钟的随机延迟
-    - cron: '0 2,15 * * *'
+    - cron: '5 2,15 * * *'
   workflow_dispatch: # 允许你随时在 Actions 页面手动点击按钮测试
 
 jobs:
