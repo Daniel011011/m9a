@@ -2,57 +2,98 @@ name: Check Activity Log
 
 on:
   schedule:
-    # 每天北京时间 10:00 (UTC 02:00) 和 23:00 (UTC 15:00)
-    # 注意：GitHub Action 的定时任务通常会有 5-30 分钟的随机延迟
-    - cron: '45 1,15 * * *'
-  workflow_dispatch: # 允许你随时在 Actions 页面手动点击按钮测试
+    - cron: '10 2,16 * * *'
+  workflow_dispatch:
 
 jobs:
   check-log:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Verify Log Activity
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check log windows
         run: |
           LOG_FILE="log.txt"
-          
-          # 1. 检查文件是否存在
+          LAST_OK_FILE=".last_success_ts"
+
           if [ ! -f "$LOG_FILE" ]; then
-            echo "错误：找不到日志文件 $LOG_FILE"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/找不到日志文件"
+            echo "❌ log.txt 不存在"
             exit 1
           fi
 
-          # 2. 读取最后一行记录
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
-          echo "文件内最后记录时间: $LAST_LOG_TIME"
-          
-          # 3. 核心：将北京时间记录转换为标准 Unix 时间戳
-          # 通过在字符串后添加 +0800 强制指定时区，防止负数出现
-          LAST_TS=$(date -d "$LAST_LOG_TIME +0800" +%s)
-          
-          # 4. 获取当前系统 Unix 时间戳
-          CURRENT_TS=$(date +%s)
-          
-          # 5. 计算时间差（秒）
-          DIFF=$(( CURRENT_TS - LAST_TS ))
-          THREE_HOURS_IN_SECONDS=10800
-          
-          echo "最后记录时间戳: $LAST_TS"
-          echo "当前系统时间戳: $CURRENT_TS"
-          echo "已停滞秒数: $DIFF"
+          LAST_LOG_TS=$(date -d "$LAST_LOG_TIME +0800" +%s)
 
-          # 6. 逻辑判断
-          if [ $DIFF -gt $THREE_HOURS_IN_SECONDS ]; then
-            echo "警告：已经超过 3 小时没有新记录！"
-            # 转换为分钟方便阅读
-            DIFF_MIN=$(( DIFF / 60 ))
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/记录已停滞${DIFF_MIN}分钟"
-          elif [ $DIFF -lt 0 ]; then
-            echo "异常：时间差为负数，请检查 log.txt 格式是否为 YYYY-MM-DD HH:MM:SS"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行出错/时间计算逻辑异常"
+          # 当前北京时间
+          NOW_LOCAL=$(date -u -d "+8 hour" +"%Y-%m-%d %H:%M:%S")
+          TODAY=$(date -u -d "+8 hour" +"%Y-%m-%d")
+          YESTERDAY=$(date -u -d "+8 hour -1 day" +"%Y-%m-%d")
+
+          echo "当前时间: $NOW_LOCAL"
+          echo "日志时间: $LAST_LOG_TIME"
+
+          # === 定义两个窗口 ===
+          MORNING_START=$(date -d "$TODAY 08:03:00 +0800" +%s)
+          MORNING_END=$((MORNING_START + 3600))
+
+          NIGHT_START_TODAY=$(date -d "$TODAY 22:32:00 +0800" +%s)
+          NIGHT_END_TODAY=$((NIGHT_START_TODAY + 3600))
+
+          NIGHT_START_YESTERDAY=$(date -d "$YESTERDAY 22:32:00 +0800" +%s)
+          NIGHT_END_YESTERDAY=$((NIGHT_START_YESTERDAY + 3600))
+
+          STATUS="ok"
+          MSG=""
+
+          # === 判断当前是在检查哪个窗口 ===
+          HOUR=$(date -u -d "+8 hour" +%H)
+
+          if [ "$HOUR" -lt 12 ]; then
+            # 👉 早上运行 → 检查今天早上窗口
+            echo "检查：早上窗口"
+
+            if [ "$LAST_LOG_TS" -ge "$MORNING_START" ] && [ "$LAST_LOG_TS" -le "$MORNING_END" ]; then
+              echo "✅ 早上窗口正常"
+              echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
+            else
+              STATUS="fail"
+              MSG="早上窗口未更新"
+            fi
+
           else
-            echo "记录正常：距离上次操作仅过去 $DIFF 秒。"
+            # 👉 半夜运行 → 检查昨天晚上窗口
+            echo "检查：晚上窗口"
+
+            if [ "$LAST_LOG_TS" -ge "$NIGHT_START_YESTERDAY" ] && [ "$LAST_LOG_TS" -le "$NIGHT_END_YESTERDAY" ]; then
+              echo "✅ 晚上窗口正常"
+              echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
+            else
+              STATUS="fail"
+              MSG="晚上窗口未更新"
+            fi
           fi
+
+          # === 上次成功时间 ===
+          if [ -f "$LAST_OK_FILE" ]; then
+            LAST_OK_TS=$(cat "$LAST_OK_FILE")
+            LAST_OK_STR=$(date -d "@$LAST_OK_TS" +"%Y-%m-%d %H:%M:%S")
+          else
+            LAST_OK_STR="无记录"
+          fi
+
+          # === 报警 ===
+          if [ "$STATUS" = "fail" ]; then
+            echo "❌ $MSG"
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG} 上次成功:${LAST_OK_STR}"
+          else
+            echo "状态正常"
+          fi
+
+      - name: Save last success
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .last_success_ts
+          git commit -m "update last success time" || echo "no changes"
+          git push
