@@ -1,5 +1,6 @@
 name: Check Activity Log
-
+permissions:
+  contents: write
 on:
   schedule:
     # 每天两次检查（UTC时间）
