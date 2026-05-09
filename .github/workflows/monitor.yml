@@ -2,6 +2,7 @@ name: Check Activity Log
 
 on:
   schedule:
+    # 10:10（检查早上窗口） / 00:10（检查晚上窗口）
     - cron: '10 2,16 * * *'
   workflow_dispatch:
 
@@ -10,13 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Check log windows
         run: |
           LOG_FILE="log.txt"
           LAST_OK_FILE=".last_success_ts"
 
+          # === 1. 检查日志文件 ===
           if [ ! -f "$LOG_FILE" ]; then
             echo "❌ log.txt 不存在"
             exit 1
@@ -25,15 +28,15 @@ jobs:
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
           LAST_LOG_TS=$(date -d "$LAST_LOG_TIME +0800" +%s)
 
-          # 当前北京时间
-          NOW_LOCAL=$(date -u -d "+8 hour" +"%Y-%m-%d %H:%M:%S")
-          TODAY=$(date -u -d "+8 hour" +"%Y-%m-%d")
-          YESTERDAY=$(date -u -d "+8 hour -1 day" +"%Y-%m-%d")
-
-          echo "当前时间: $NOW_LOCAL"
           echo "日志时间: $LAST_LOG_TIME"
 
-          # === 定义两个窗口 ===
+          # === 2. 当前北京时间 ===
+          NOW_TS=$(date +%s)
+          NOW_LOCAL_TS=$(date -d "@$NOW_TS +8 hour" +%s)
+          TODAY=$(date -d "@$NOW_LOCAL_TS" +"%Y-%m-%d")
+          YESTERDAY=$(date -d "@$NOW_LOCAL_TS -1 day" +"%Y-%m-%d")
+
+          # === 3. 定义窗口 ===
           MORNING_START=$(date -d "$TODAY 08:03:00 +0800" +%s)
           MORNING_END=$((MORNING_START + 3600))
 
@@ -43,38 +46,36 @@ jobs:
           NIGHT_START_YESTERDAY=$(date -d "$YESTERDAY 22:32:00 +0800" +%s)
           NIGHT_END_YESTERDAY=$((NIGHT_START_YESTERDAY + 3600))
 
+          # === 4. 找“最近已结束窗口” ===
+          if [ "$NOW_LOCAL_TS" -ge "$NIGHT_END_TODAY" ]; then
+            CHECK_START=$NIGHT_START_TODAY
+            CHECK_END=$NIGHT_END_TODAY
+            LABEL="今晚窗口"
+          elif [ "$NOW_LOCAL_TS" -ge "$MORNING_END" ]; then
+            CHECK_START=$MORNING_START
+            CHECK_END=$MORNING_END
+            LABEL="早上窗口"
+          else
+            CHECK_START=$NIGHT_START_YESTERDAY
+            CHECK_END=$NIGHT_END_YESTERDAY
+            LABEL="昨晚窗口"
+          fi
+
+          echo "当前检查窗口: $LABEL"
+
           STATUS="ok"
           MSG=""
 
-          # === 判断当前是在检查哪个窗口 ===
-          HOUR=$(date -u -d "+8 hour" +%H)
-
-          if [ "$HOUR" -lt 12 ]; then
-            # 👉 早上运行 → 检查今天早上窗口
-            echo "检查：早上窗口"
-
-            if [ "$LAST_LOG_TS" -ge "$MORNING_START" ] && [ "$LAST_LOG_TS" -le "$MORNING_END" ]; then
-              echo "✅ 早上窗口正常"
-              echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
-            else
-              STATUS="fail"
-              MSG="早上窗口未更新"
-            fi
-
+          # === 5. 判断日志是否落在窗口内 ===
+          if [ "$LAST_LOG_TS" -ge "$CHECK_START" ] && [ "$LAST_LOG_TS" -le "$CHECK_END" ]; then
+            echo "✅ $LABEL 正常"
+            echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
           else
-            # 👉 半夜运行 → 检查昨天晚上窗口
-            echo "检查：晚上窗口"
-
-            if [ "$LAST_LOG_TS" -ge "$NIGHT_START_YESTERDAY" ] && [ "$LAST_LOG_TS" -le "$NIGHT_END_YESTERDAY" ]; then
-              echo "✅ 晚上窗口正常"
-              echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
-            else
-              STATUS="fail"
-              MSG="晚上窗口未更新"
-            fi
+            STATUS="fail"
+            MSG="$LABEL 未更新"
           fi
 
-          # === 上次成功时间 ===
+          # === 6. 获取上次成功时间 ===
           if [ -f "$LAST_OK_FILE" ]; then
             LAST_OK_TS=$(cat "$LAST_OK_FILE")
             LAST_OK_STR=$(date -d "@$LAST_OK_TS" +"%Y-%m-%d %H:%M:%S")
@@ -82,7 +83,7 @@ jobs:
             LAST_OK_STR="无记录"
           fi
 
-          # === 报警 ===
+          # === 7. 报警 ===
           if [ "$STATUS" = "fail" ]; then
             echo "❌ $MSG"
             curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG} 上次成功:${LAST_OK_STR}"
