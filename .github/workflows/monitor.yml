@@ -91,12 +91,16 @@ jobs:
           # === 7. 通知（永不失败） ===
           if [ "$STATUS" = "fail" ]; then
             echo "❌ $MSG"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG} 上次成功:${LAST_OK_STR}" || true
+          
+            MSG_FULL="${MSG} 上次成功:${LAST_OK_STR}"
+          
+            curl -G \
+              --data-urlencode "text=$MSG_FULL" \
+              "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败" || true
+          
           else
             echo "状态正常"
           fi
-
-          exit 0
 
       - name: Save last success
         run: |
