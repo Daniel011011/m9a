@@ -88,20 +88,21 @@ jobs:
             LAST_OK_STR="无记录"
           fi
 
-          # === 7. 通知（永不失败） ===
+          # === 7. 通知 ===
           if [ "$STATUS" = "fail" ]; then
             echo "❌ $MSG"
           
-            MSG_FULL="${MSG} 上次成功:${LAST_OK_STR}"
+            # 只去掉空格
+            LAST_OK_CLEAN=$(echo "$LAST_OK_STR" | tr -d ' ')
+            MSG_CLEAN=$(echo "$MSG" | tr -d ' ')
           
-            curl -G \
-              --data-urlencode "text=$MSG_FULL" \
-              "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败" || true
+            MSG_FULL="${MSG_CLEAN}上次成功${LAST_OK_CLEAN}"
+          
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG_FULL}" || true
           
           else
             echo "状态正常"
           fi
-
       - name: Save last success
         run: |
           set +e
