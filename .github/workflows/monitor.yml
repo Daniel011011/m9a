@@ -1,11 +1,10 @@
 name: Check Activity Log
+
 permissions:
   contents: write
+
 on:
   schedule:
-    # 每天两次检查（UTC时间）
-    # 10:10 SGT ≈ 02:10 UTC
-    # 00:10 SGT ≈ 16:10 UTC
     - cron: '10 2,16 * * *'
   workflow_dispatch:
 
@@ -19,6 +18,7 @@ jobs:
 
       - name: Check log windows
         run: |
+          set +e
           export TZ='Asia/Shanghai'
 
           LOG_FILE="log.txt"
@@ -27,7 +27,8 @@ jobs:
           # === 1. 检查日志 ===
           if [ ! -f "$LOG_FILE" ]; then
             echo "❌ log.txt 不存在"
-            exit 1
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/log不存在" || true
+            exit 0
           fi
 
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
@@ -50,7 +51,7 @@ jobs:
           NIGHT_START_YESTERDAY=$(date -d "$YESTERDAY 22:32:00" +%s)
           NIGHT_END_YESTERDAY=$((NIGHT_START_YESTERDAY + 3600))
 
-          # === 4. 找最近已结束窗口（核心逻辑） ===
+          # === 4. 找最近已结束窗口 ===
           if [ "$NOW_TS" -ge "$NIGHT_END_TODAY" ]; then
             CHECK_START=$NIGHT_START_TODAY
             CHECK_END=$NIGHT_END_TODAY
@@ -70,7 +71,7 @@ jobs:
           STATUS="ok"
           MSG=""
 
-          # === 5. 判断是否命中窗口 ===
+          # === 5. 判断 ===
           if [ "$LAST_LOG_TS" -ge "$CHECK_START" ] && [ "$LAST_LOG_TS" -le "$CHECK_END" ]; then
             echo "✅ $LABEL 正常"
             echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
@@ -87,16 +88,19 @@ jobs:
             LAST_OK_STR="无记录"
           fi
 
-          # === 7. 通知 ===
+          # === 7. 通知（永不失败） ===
           if [ "$STATUS" = "fail" ]; then
             echo "❌ $MSG"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG} 上次成功:${LAST_OK_STR}"
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG} 上次成功:${LAST_OK_STR}" || true
           else
             echo "状态正常"
           fi
 
+          exit 0
+
       - name: Save last success
         run: |
+          set +e
           export TZ='Asia/Shanghai'
 
           git config user.name "github-actions"
@@ -104,4 +108,4 @@ jobs:
 
           git add .last_success_ts
           git commit -m "update last success time" || echo "no changes"
-          git push
+          git push || true
