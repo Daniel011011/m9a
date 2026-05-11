@@ -22,7 +22,6 @@ jobs:
           export TZ='Asia/Shanghai'
 
           LOG_FILE="log.txt"
-          LAST_OK_FILE=".last_success_ts"
 
           # === 1. 检查日志 ===
           if [ ! -f "$LOG_FILE" ]; then
@@ -34,7 +33,11 @@ jobs:
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
           LAST_LOG_TS=$(date -d "$LAST_LOG_TIME" +%s)
 
+          # 👉 关键：读取“上一条日志”
+          PREV_LOG_TIME=$(tail -n 2 "$LOG_FILE" | head -n 1)
+
           echo "日志时间: $LAST_LOG_TIME"
+          echo "上一条日志: $PREV_LOG_TIME"
 
           # === 2. 当前时间 ===
           NOW_TS=$(date +%s)
@@ -74,16 +77,14 @@ jobs:
           # === 5. 判断 ===
           if [ "$LAST_LOG_TS" -ge "$CHECK_START" ] && [ "$LAST_LOG_TS" -le "$CHECK_END" ]; then
             echo "✅ $LABEL 正常"
-            echo "$LAST_LOG_TS" > "$LAST_OK_FILE"
           else
             STATUS="fail"
             MSG="$LABEL 未更新"
           fi
 
-          # === 6. 上次成功时间 ===
-          if [ -f "$LAST_OK_FILE" ]; then
-            LAST_OK_TS=$(cat "$LAST_OK_FILE")
-            LAST_OK_STR=$(date -d "@$LAST_OK_TS" +"%Y-%m-%d %H:%M:%S")
+          # === 6. 上次成功时间（来自 log.txt）===
+          if [ -n "$PREV_LOG_TIME" ]; then
+            LAST_OK_STR=$(echo "$PREV_LOG_TIME" | tr ' ' '-')
           else
             LAST_OK_STR="无记录"
           fi
@@ -91,26 +92,13 @@ jobs:
           # === 7. 通知 ===
           if [ "$STATUS" = "fail" ]; then
             echo "❌ $MSG"
-          
-            # 只去掉空格
-            LAST_OK_CLEAN=$(echo "$LAST_OK_STR" | tr -d ' ')
+
             MSG_CLEAN=$(echo "$MSG" | tr -d ' ')
-          
-            MSG_FULL="${MSG_CLEAN}上次成功${LAST_OK_CLEAN}"
-          
+
+            MSG_FULL="${MSG_CLEAN}上次成功${LAST_OK_STR}"
+
             curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG_FULL}" || true
-          
+
           else
             echo "状态正常"
           fi
-      - name: Save last success
-        run: |
-          set +e
-          export TZ='Asia/Shanghai'
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          git add .last_success_ts
-          git commit -m "update last success time" || echo "no changes"
-          git push || true
