@@ -1,58 +1,98 @@
 name: Check Activity Log
 
+permissions:
+  contents: write
+
 on:
   schedule:
-    # 每天北京时间 10:00 (UTC 02:00) 和 23:00 (UTC 15:00)
-    # 注意：GitHub Action 的定时任务通常会有 5-30 分钟的随机延迟
-    - cron: '0 2,15 * * *'
-  workflow_dispatch: # 允许你随时在 Actions 页面手动点击按钮测试
+    - cron: '10 2,16 * * *'
+  workflow_dispatch:
 
 jobs:
   check-log:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Log Activity
+      - name: Check log windows
         run: |
+          set +e
+          export TZ='Asia/Shanghai'
+
           LOG_FILE="log.txt"
-          
-          # 1. 检查文件是否存在
+
+          # === 1. 检查日志 ===
           if [ ! -f "$LOG_FILE" ]; then
-            echo "错误：找不到日志文件 $LOG_FILE"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/找不到日志文件"
-            exit 1
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/log不存在" || true
+            exit 0
           fi
 
-          # 2. 读取最后一行记录
           LAST_LOG_TIME=$(tail -n 1 "$LOG_FILE")
-          echo "文件内最后记录时间: $LAST_LOG_TIME"
-          
-          # 3. 核心：将北京时间记录转换为标准 Unix 时间戳
-          # 通过在字符串后添加 +0800 强制指定时区，防止负数出现
-          LAST_TS=$(date -d "$LAST_LOG_TIME +0800" +%s)
-          
-          # 4. 获取当前系统 Unix 时间戳
-          CURRENT_TS=$(date +%s)
-          
-          # 5. 计算时间差（秒）
-          DIFF=$(( CURRENT_TS - LAST_TS ))
-          THREE_HOURS_IN_SECONDS=10800
-          
-          echo "最后记录时间戳: $LAST_TS"
-          echo "当前系统时间戳: $CURRENT_TS"
-          echo "已停滞秒数: $DIFF"
+          LAST_LOG_TS=$(date -d "$LAST_LOG_TIME" +%s)
 
-          # 6. 逻辑判断
-          if [ $DIFF -gt $THREE_HOURS_IN_SECONDS ]; then
-            echo "警告：已经超过 3 小时没有新记录！"
-            # 转换为分钟方便阅读
-            DIFF_MIN=$(( DIFF / 60 ))
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/记录已停滞${DIFF_MIN}分钟"
-          elif [ $DIFF -lt 0 ]; then
-            echo "异常：时间差为负数，请检查 log.txt 格式是否为 YYYY-MM-DD HH:MM:SS"
-            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行出错/时间计算逻辑异常"
+          echo "日志时间: $LAST_LOG_TIME"
+
+          # === 2. 当前时间 ===
+          NOW_TS=$(date +%s)
+          TODAY=$(date +"%Y-%m-%d")
+          YESTERDAY=$(date -d "yesterday" +"%Y-%m-%d")
+
+          # === 3. 定义窗口 ===
+          MORNING_START=$(date -d "$TODAY 08:03:00" +%s)
+          MORNING_END=$((MORNING_START + 3600))
+
+          NIGHT_START_TODAY=$(date -d "$TODAY 22:32:00" +%s)
+          NIGHT_END_TODAY=$((NIGHT_START_TODAY + 3600))
+
+          NIGHT_START_YESTERDAY=$(date -d "$YESTERDAY 22:32:00" +%s)
+          NIGHT_END_YESTERDAY=$((NIGHT_START_YESTERDAY + 3600))
+
+          # === 4. 找最近已结束窗口 ===
+          if [ "$NOW_TS" -ge "$NIGHT_END_TODAY" ]; then
+            CHECK_START=$NIGHT_START_TODAY
+            CHECK_END=$NIGHT_END_TODAY
+            LABEL="今晚窗口"
+          elif [ "$NOW_TS" -ge "$MORNING_END" ]; then
+            CHECK_START=$MORNING_START
+            CHECK_END=$MORNING_END
+            LABEL="早上窗口"
           else
-            echo "记录正常：距离上次操作仅过去 $DIFF 秒。"
+            CHECK_START=$NIGHT_START_YESTERDAY
+            CHECK_END=$NIGHT_END_YESTERDAY
+            LABEL="昨晚窗口"
           fi
+
+          STATUS="ok"
+          MSG=""
+
+          # === 5. 判断 ===
+          if [ "$LAST_LOG_TS" -ge "$CHECK_START" ] && [ "$LAST_LOG_TS" -le "$CHECK_END" ]; then
+            echo "状态正常"
+          else
+            STATUS="fail"
+            MSG="$LABEL 未更新"
+          fi
+
+          # === 6. 使用最新日志时间 ===
+          LAST_OK_STR=$(echo "$LAST_LOG_TIME" | tr ' ' '-')
+
+          # === 7. 通知 ===
+          if [ "$STATUS" = "fail" ]; then
+            MSG_CLEAN=$(echo "$MSG" | tr -d ' ')
+            MSG_FULL="${MSG_CLEAN}上次成功${LAST_OK_STR}"
+            curl -s "https://api.day.app/Ua37yhGwsH7cUVbzhcTpn3/m9a运行失败/${MSG_FULL}" || true
+          fi
+
+      - name: Save last success
+        run: |
+          set +e
+          export TZ='Asia/Shanghai'
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add . || true
+          git commit -m "update" || true
+          git push || true
