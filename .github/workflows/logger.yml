@@ -29,3 +29,14 @@ jobs:
           git add log.txt
           git commit -m "chore: add timestamp [skip ci]"
           git push
+
+      - name: Update Gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          TIMESTAMP=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+          curl -X PATCH \
+            -H "Authorization: token $GIST_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/gists/5ed24b20cd6bcfe717d63193e478f516 \
+            -d "{\"files\":{\"m9a.json\":{\"content\":\"{\\\"update_time\\\":\\\"$TIMESTAMP\\\"}\"}}}"
