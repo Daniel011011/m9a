@@ -4,8 +4,6 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: '10 2,16 * * *'
   workflow_dispatch:
 
 jobs:
